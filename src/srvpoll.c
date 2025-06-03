@@ -1,48 +1,26 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <unistd.h>
-#include <string.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
 #include <arpa/inet.h>
 #include <sys/time.h>
 #include <poll.h>
+#include <string.h>
+#include <parse.h>
+#include <stdlib.h>
+#include "srvpoll.h"
 
-#define MAX_CLIENT 256
-#define PORT 8080
-#define BUFF_SIZE 4096
-
-typedef enum
-{
-    STATE_NEW,
-    STATE_CONNECTED,
-    STATE_DISCONNECTED,
-} state_e;
-
-typedef struct
-{
-    int fd;
-    state_e state;
-    char buffer[BUFF_SIZE];
-} clientstate_t;
-
-clientstate_t clientstates[MAX_CLIENT];
-
-void init_clients()
+void init_client(clientstate_t *states)
 {
     for (int i = 0; i < MAX_CLIENT; i++)
     {
-        clientstates[i].fd = -1;
-        clientstates[i].state = STATE_NEW;
-        memset(&clientstates[i].buffer, '\0', BUFF_SIZE);
+        states[i].fd = -1;
+        states[i].state = STATE_NEW;
+        memset(states[i].buffer, '\0', BUFF_SIZE);
     }
 }
 
-int find_free_client()
+int find_free_slot(clientstate_t *states)
 {
     for (int i = 0; i < MAX_CLIENT; i++)
     {
-        if (clientstates[i].fd == -1)
+        if (states[i].fd == -1)
         {
             return i;
         }
@@ -50,17 +28,17 @@ int find_free_client()
     return -1;
 }
 
-int find_client_by_fd(int fd)
+int find_slot_by_fd(clientstate_t *states, int fd)
 {
     for (int i = 0; i < MAX_CLIENT; i++)
     {
-        if (clientstates[i].fd == fd)
+        if (states[i].fd == fd)
             return i;
     }
     return -1;
 }
 
-int main(int argc, char **argv)
+void pool_loop(unsigned short port, struct dbheader_t *dbhdr, struct employee_t *employees)
 {
     int listen_fd, conn_fd, slotFd;
     struct sockaddr_in server_addr, client_addr;
@@ -69,7 +47,8 @@ int main(int argc, char **argv)
     struct pollfd fds[MAX_CLIENT + 1];
     int opt = 1;
     int nfds = 0, freeSlot = -1;
-    init_clients();
+    clientstate_t clientStates[MAX_CLIENT];
+    init_clients(&clientStates);
 
     // Create a socket
     if ((listen_fd = socket(AF_INET, SOCK_STREAM, 0)) == -1)
@@ -93,7 +72,7 @@ int main(int argc, char **argv)
     memset(&server_addr, 0, sizeof(server_addr));
     server_addr.sin_family = AF_INET;
     server_addr.sin_addr.s_addr = INADDR_ANY;
-    server_addr.sin_port = htons(PORT);
+    server_addr.sin_port = htons(port);
 
     // Bind
     if (bind(listen_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)) == -1)
@@ -111,16 +90,16 @@ int main(int argc, char **argv)
         exit(EXIT_FAILURE);
     }
 
-    printf("Server listening on port: %d\n", PORT);
+    printf("Server listening on port: %d\n", port);
 
     while (1)
     {
         nfds = 1;
         for (int i = 0; i < MAX_CLIENT; i++)
         {
-            if (clientstates[i].fd != -1)
+            if (clientStates[i].fd != -1)
             {
-                fds[nfds].fd = clientstates[i].fd;
+                fds[nfds].fd = clientStates[i].fd;
                 fds[nfds].events = POLLIN;
                 nfds++;
             }
@@ -152,8 +131,8 @@ int main(int argc, char **argv)
             }
             else
             {
-                clientstates[freeSlot].fd = conn_fd;
-                clientstates[freeSlot].state = STATE_CONNECTED;
+                clientStates[freeSlot].fd = conn_fd;
+                clientStates[freeSlot].state = STATE_CONNECTED;
                 printf("Slot %d assigned fd %d\n", freeSlot, conn_fd);
             }
             n_events--;
@@ -168,22 +147,21 @@ int main(int argc, char **argv)
                 if (slot == -1)
                     continue;
 
-                ssize_t bytes_read = read(fd, clientstates[slot].buffer, sizeof(clientstates[slot].buffer));
+                ssize_t bytes_read = read(fd, clientStates[slot].buffer, sizeof(clientStates[slot].buffer));
                 if (bytes_read <= 0)
                 {
                     close(fd);
-                    clientstates[slot].fd = -1;
-                    clientstates[slot].state = STATE_DISCONNECTED;
+                    clientStates[slot].fd = -1;
+                    clientStates[slot].state = STATE_DISCONNECTED;
                     printf("Client %d disconnected\n", slot);
                 }
                 else
                 {
-                    clientstates[slot].buffer[bytes_read] = '\0';
-                    printf("Received from client %d: %s\n", slot, clientstates[slot].buffer);
+                    clientStates[slot].buffer[bytes_read] = '\0';
+                    printf("Received from client %d: %s\n", slot, clientStates[slot].buffer);
                 }
                 n_events--;
             }
         }
     }
-    return 0;
 }

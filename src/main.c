@@ -4,14 +4,17 @@
 #include <stdlib.h>
 #include <common.h>
 #include <unistd.h>
+
 #include "file.h"
 #include "parse.h"
+#include "srvpoll.h"
 
 void print_usage(char **argv)
 {
     printf("Usage: %s -n -f <database file>\n", argv[0]);
     printf("\t -n created a new database file\n");
     printf("\t -f (required) path to database file\n");
+    printf("\t -p (required) port to liten to\n");
 }
 
 int main(int argc, char **argv)
@@ -19,15 +22,17 @@ int main(int argc, char **argv)
     int c = 0;
     bool newFile = false;
     bool list = false;
+    unsigned short port = 0;
     char *filepath = NULL;
     char *addString = NULL;
     char *remove = NULL;
     char *update = NULL;
+    char *portArg = NULL;
     struct dbheader_t *dbhd = NULL;
     struct employee_t *employees = NULL;
     int dbfd = -1;
 
-    while ((c = getopt(argc, argv, "nf:a:lr:u:")) != -1)
+    while ((c = getopt(argc, argv, "nf:a:lr:u:p")) != -1)
     {
         switch (c)
         {
@@ -39,6 +44,16 @@ int main(int argc, char **argv)
             break;
         case 'l':
             list = true;
+            break;
+        case 'p':
+            portArg = optarg;
+            if (portArg == NULL)
+            {
+                printf("Port Arg is a requierd Argument\n");
+                print_usage(argv);
+                return -1;
+            }
+            port = atoi(portArg);
             break;
         case 'r':
             remove = optarg;
@@ -62,6 +77,13 @@ int main(int argc, char **argv)
         printf("file path is a required argument\n");
         print_usage(argv);
 
+        return 0;
+    }
+
+    if (port <= 0)
+    {
+        printf("Port not set\n");
+        print_usage(argv);
         return 0;
     }
 
@@ -144,6 +166,8 @@ int main(int argc, char **argv)
     {
         list_employee(dbhd, employees);
     }
+
+    pool_loop(port, dbhd, employees);
 
     close(dbfd);
     free(employees);
